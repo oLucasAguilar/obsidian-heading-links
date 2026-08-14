@@ -18,7 +18,7 @@ At the end of a heading line, the names of the notes that link to it.
 
 Click a name to open it, ctrl+hover to preview. A note linking to its own heading is not listed, since that tells you nothing.
 
-<!-- ![](docs/backlinks.gif) -->
+![](docs/backlinks.gif)
 
 ## Install
 
