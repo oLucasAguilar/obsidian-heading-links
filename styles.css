@@ -1,0 +1,47 @@
+.heading-links-breadcrumb {
+  cursor: pointer;
+  color: var(--link-color);
+  text-decoration: var(--link-decoration);
+  white-space: nowrap;
+}
+
+.heading-links-breadcrumb:hover {
+  color: var(--link-color-hover);
+  text-decoration: var(--link-decoration-hover);
+}
+
+.heading-links-breadcrumb .heading-links-sep {
+  margin: 0 0.3em;
+  opacity: 0.45;
+  font-weight: 400;
+}
+
+.heading-links-breadcrumb .heading-links-file {
+  color: inherit;
+}
+
+.heading-links-breadcrumb .heading-links-head {
+  font-weight: inherit;
+}
+
+.heading-links-backlinks {
+  margin-left: 0.9em;
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-normal);
+  font-style: normal;
+  font-variant: normal;
+  letter-spacing: normal;
+  line-height: 1;
+  color: var(--text-faint);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.heading-links-ref {
+  cursor: pointer;
+}
+
+.heading-links-ref:hover {
+  color: var(--link-color);
+}
