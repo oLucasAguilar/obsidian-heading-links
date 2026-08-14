@@ -10,7 +10,7 @@ Obsidian already does this in Reading view, but in Live Preview the link stays r
 
 Nested anchors work: every `#` becomes a step.
 
-<!-- ![](docs/breadcrumbs.gif) -->
+![](docs/breadcrumbs.gif)
 
 ## Which notes link to a heading
 
