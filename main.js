@@ -162,6 +162,16 @@ function wireLink(app, el, linktext, sourcePath, options) {
   });
 }
 
+function renderRefs(app, container, refs, sourcePath) {
+  refs.forEach((ref, i) => {
+    if (i > 0) container.createSpan({ cls: 'heading-links-refsep' }).setText(', ');
+    const name = container.createSpan({ cls: 'heading-links-ref' });
+    name.setAttribute('data-href', ref.sourcePath);
+    name.setText(ref.sourceName + (ref.count > 1 ? ` (${ref.count})` : ''));
+    wireLink(app, name, ref.sourcePath, sourcePath);
+  });
+}
+
 function renderBreadcrumb(container, parts) {
   parts.forEach((part, i) => {
     if (i > 0) {
@@ -207,46 +217,57 @@ class BacklinkIndex {
   constructor(app) {
     this.app = app;
     this.byTarget = new Map();
+    this.byFile = new Map();
   }
 
   rebuild() {
     const byTarget = new Map();
+    const byFile = new Map();
     for (const file of this.app.vault.getMarkdownFiles()) {
       const cache = this.app.metadataCache.getFileCache(file);
       if (!cache) continue;
       const refs = (cache.links || []).concat(cache.embeds || []);
       for (const ref of refs) {
         const parsed = splitLinkText(ref.link || '');
-        if (parsed.segments.length === 0 || parsed.isBlockRef) continue;
         const target = parsed.path
           ? this.app.metadataCache.getFirstLinkpathDest(parsed.path, file.path)
           : file;
         if (!target) continue;
         if (target.path === file.path) continue;
-        if (!byTarget.has(target.path)) byTarget.set(target.path, []);
-        byTarget.get(target.path).push({
+        const entry = {
           sourcePath: file.path,
           sourceName: file.basename,
           segments: parsed.segments,
           line: (ref.position && ref.position.start && ref.position.start.line) || 0,
-        });
+        };
+        if (parsed.segments.length > 0 && !parsed.isBlockRef) {
+          /* A heading link is already named under its heading, so the title
+           * takes what no heading claims: plain links and block refs. */
+          if (!byTarget.has(target.path)) byTarget.set(target.path, []);
+          byTarget.get(target.path).push(entry);
+          continue;
+        }
+        if (!byFile.has(target.path)) byFile.set(target.path, []);
+        byFile.get(target.path).push(entry);
       }
     }
     this.byTarget = byTarget;
+    this.byFile = new Map();
+    for (const [path, refs] of byFile) this.byFile.set(path, dedupeBySource(refs));
   }
 
   refsFor(path) {
     return this.byTarget.get(path) || [];
   }
+
+  fileRefsFor(path) {
+    return this.byFile.get(path) || [];
+  }
 }
 
-function groupRefsByHeadingLine(text, refs) {
-  const byLine = new Map();
+function dedupeBySource(refs) {
+  const bucket = new Map();
   for (const ref of refs) {
-    const section = findSection(text, ref.segments);
-    if (!section) continue;
-    if (!byLine.has(section.headingLine)) byLine.set(section.headingLine, new Map());
-    const bucket = byLine.get(section.headingLine);
     const existing = bucket.get(ref.sourcePath);
     if (existing) {
       existing.count += 1;
@@ -259,10 +280,31 @@ function groupRefsByHeadingLine(text, refs) {
       });
     }
   }
-  const out = new Map();
-  for (const [line, bucket] of byLine) {
-    out.set(line, Array.from(bucket.values()).sort((a, b) => a.sourceName.localeCompare(b.sourceName)));
+  return Array.from(bucket.values()).sort((a, b) => a.sourceName.localeCompare(b.sourceName));
+}
+
+/* The headings of this note that some other note points at, in document order.
+ * A link into a heading that no longer exists resolves to nothing and drops out. */
+function summarizeHeadings(text, refs) {
+  const byLine = groupRefsByHeadingLine(text, refs);
+  if (byLine.size === 0) return [];
+  const titles = new Map();
+  for (const heading of parseHeadings(text).headings) titles.set(heading.line, heading.text);
+  return Array.from(byLine, ([line, refs]) => ({ line, text: titles.get(line) || '', refs })).sort(
+    (a, b) => a.line - b.line
+  );
+}
+
+function groupRefsByHeadingLine(text, refs) {
+  const byLine = new Map();
+  for (const ref of refs) {
+    const section = findSection(text, ref.segments);
+    if (!section) continue;
+    if (!byLine.has(section.headingLine)) byLine.set(section.headingLine, []);
+    byLine.get(section.headingLine).push(ref);
   }
+  const out = new Map();
+  for (const [line, bucket] of byLine) out.set(line, dedupeBySource(bucket));
   return out;
 }
 
@@ -311,13 +353,7 @@ class BacklinkWidget extends WidgetType {
   toDOM() {
     const el = document.createElement('span');
     el.className = 'heading-links-backlinks';
-    this.refs.forEach((ref, i) => {
-      if (i > 0) el.createSpan({ cls: 'heading-links-refsep' }).setText(', ');
-      const name = el.createSpan({ cls: 'heading-links-ref' });
-      name.setAttribute('data-href', ref.sourcePath);
-      name.setText(ref.sourceName + (ref.count > 1 ? ` (${ref.count})` : ''));
-      wireLink(this.plugin.app, name, ref.sourcePath, this.sourcePath);
-    });
+    renderRefs(this.plugin.app, el, this.refs, this.sourcePath);
     return el;
   }
 
@@ -399,16 +435,179 @@ function makeViewPlugin(plugin) {
   );
 }
 
+const TITLE_BADGE = 'heading-links-title-backlinks';
+
+function viewText(view) {
+  if (typeof view.getViewData === 'function') return view.getViewData();
+  return typeof view.data === 'string' ? view.data : '';
+}
+
+function revealHeading(app, view, line) {
+  const editor = view.editor;
+  if (editor && typeof editor.setCursor === 'function') {
+    editor.setCursor({ line, ch: 0 });
+    if (typeof editor.scrollIntoView === 'function') {
+      editor.scrollIntoView({ from: { line, ch: 0 }, to: { line, ch: 0 } }, true);
+    }
+    editor.focus();
+    return;
+  }
+  const file = view.file;
+  if (file) app.workspace.openLinkText(file.path, file.path, false);
+}
+
+/* The native menu class carries the background, border, shadow and position:
+ * fixed. Only the coordinates are ours, kept inside the window. */
+function placeMenu(menu, anchor) {
+  const margin = 8;
+  const at = anchor.getBoundingClientRect();
+  menu.style.visibility = 'hidden';
+  menu.style.left = '0px';
+  menu.style.top = '0px';
+  const size = menu.getBoundingClientRect();
+  const left = Math.max(margin, Math.min(at.left, window.innerWidth - size.width - margin));
+  let top = at.bottom + 4;
+  if (top + size.height > window.innerHeight - margin) {
+    top = Math.max(margin, at.top - size.height - 4);
+  }
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+  menu.style.visibility = '';
+}
+
+/* The inline title is not part of the document, it is a contenteditable div the
+ * view keeps above the editor. The badge goes inside it so it sits at the end of
+ * the title line and wraps with it, but the title text is what renames the file:
+ * anything left in there while the user types would end up in the name. So the
+ * badge is pulled out the moment the title takes focus and put back on blur. */
+class TitleBacklinks {
+  constructor(plugin) {
+    this.plugin = plugin;
+    this.menu = null;
+    this.dismiss = null;
+  }
+
+  titleElFor(view) {
+    if (!view || !view.containerEl) return null;
+    for (const el of view.containerEl.querySelectorAll('.inline-title')) {
+      if (!el.closest('.markdown-embed, .inline-embed, .hover-popover')) return el;
+    }
+    return null;
+  }
+
+  refresh() {
+    this.closeSummary();
+    for (const leaf of this.plugin.app.workspace.getLeavesOfType('markdown')) {
+      try {
+        this.render(leaf.view);
+      } catch (err) {
+        console.error('[heading-links] could not render title backlinks', err);
+      }
+    }
+  }
+
+  clearAll() {
+    this.closeSummary();
+    for (const leaf of this.plugin.app.workspace.getLeavesOfType('markdown')) {
+      const titleEl = this.titleElFor(leaf.view);
+      if (titleEl) this.clear(titleEl);
+    }
+  }
+
+  clear(titleEl) {
+    titleEl.querySelectorAll('.' + TITLE_BADGE).forEach((el) => el.remove());
+  }
+
+  render(view) {
+    const titleEl = this.titleElFor(view);
+    if (!titleEl) return;
+    this.clear(titleEl);
+    const file = view.file;
+    if (!file) return;
+    if (titleEl === document.activeElement || titleEl.contains(document.activeElement)) return;
+
+    const refs = this.plugin.settings.titleBacklinks ? this.plugin.index.fileRefsFor(file.path) : [];
+    const groups = this.plugin.settings.headingSummary
+      ? summarizeHeadings(viewText(view), this.plugin.index.refsFor(file.path))
+      : [];
+    if (refs.length === 0 && groups.length === 0) return;
+
+    const badge = titleEl.createSpan({ cls: 'heading-links-backlinks ' + TITLE_BADGE });
+    badge.contentEditable = 'false';
+    badge.spellcheck = false;
+    badge.addEventListener('mousedown', (event) => event.preventDefault());
+    renderRefs(this.plugin.app, badge, refs, file.path);
+    if (groups.length) this.renderChip(badge, view, groups, refs.length > 0);
+  }
+
+  renderChip(badge, view, groups, afterNames) {
+    const chip = badge.createSpan({ cls: 'heading-links-chip' });
+    const count = groups.length;
+    chip.setText(`${afterNames ? '+' : ''}${count} heading${count > 1 ? 's' : ''}`);
+    chip.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (this.menu) this.closeSummary();
+      else this.openSummary(chip, view, groups);
+    });
+  }
+
+  openSummary(chip, view, groups) {
+    const app = this.plugin.app;
+    const sourcePath = view.file.path;
+    const menu = document.body.createDiv({ cls: 'menu heading-links-summary' });
+    const grid = menu.createDiv({ cls: 'heading-links-summary-grid' });
+    for (const group of groups) {
+      const name = grid.createSpan({ cls: 'heading-links-summary-heading' });
+      name.setText(group.text);
+      name.addEventListener('click', () => {
+        this.closeSummary();
+        revealHeading(app, view, group.line);
+      });
+      renderRefs(app, grid.createSpan({ cls: 'heading-links-backlinks' }), group.refs, sourcePath);
+    }
+    /* Opening a note from inside the summary leaves it stale, so any click in
+     * there closes it once the click has been handled. */
+    menu.addEventListener('click', () => window.setTimeout(() => this.closeSummary(), 0), true);
+
+    this.dismiss = (event) => {
+      if (event.type === 'keydown' && event.key !== 'Escape') return;
+      /* A press on the chip is its own toggle, not a dismissal. */
+      if (event.type === 'mousedown' && (menu.contains(event.target) || chip.contains(event.target))) return;
+      this.closeSummary();
+    };
+    document.addEventListener('mousedown', this.dismiss, true);
+    document.addEventListener('keydown', this.dismiss, true);
+    window.addEventListener('resize', this.dismiss, true);
+
+    this.menu = menu;
+    placeMenu(menu, chip);
+  }
+
+  closeSummary() {
+    if (!this.menu) return;
+    document.removeEventListener('mousedown', this.dismiss, true);
+    document.removeEventListener('keydown', this.dismiss, true);
+    window.removeEventListener('resize', this.dismiss, true);
+    this.menu.remove();
+    this.menu = null;
+    this.dismiss = null;
+  }
+}
+
 const DEFAULT_SETTINGS = {
   breadcrumbLinks: true,
   breadcrumbOnEmbeds: false,
   headingBacklinks: true,
+  titleBacklinks: true,
+  headingSummary: true,
 };
 
 class HeadingLinksPlugin extends obsidian.Plugin {
   async onload() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.index = new BacklinkIndex(this.app);
+    this.titles = new TitleBacklinks(this);
 
     this.rebuildIndex = obsidian.debounce(
       () => {
@@ -431,6 +630,21 @@ class HeadingLinksPlugin extends obsidian.Plugin {
     this.registerEvent(this.app.metadataCache.on('changed', () => this.rebuildIndex()));
     this.registerEvent(this.app.vault.on('rename', () => this.rebuildIndex()));
     this.registerEvent(this.app.vault.on('delete', () => this.rebuildIndex()));
+
+    /* The view rewrites the title text on open and on rename, which drops the
+     * badge with it, so it is rendered again after each of those. */
+    this.registerEvent(this.app.workspace.on('file-open', () => this.refreshEditors()));
+    this.registerEvent(this.app.workspace.on('layout-change', () => this.refreshEditors()));
+    for (const type of ['focusin', 'focusout']) {
+      this.registerDomEvent(document, type, (event) => {
+        const el = event.target;
+        if (el instanceof HTMLElement && el.classList.contains('inline-title')) this.refreshEditors();
+      });
+    }
+  }
+
+  onunload() {
+    if (this.titles) this.titles.clearAll();
   }
 
   refreshEditors() {
@@ -438,6 +652,7 @@ class HeadingLinksPlugin extends obsidian.Plugin {
     this.refreshQueued = true;
     window.setTimeout(() => {
       this.refreshQueued = false;
+      this.titles.refresh();
       this.app.workspace.iterateAllLeaves((leaf) => {
         const view = leaf.view;
         const cm = view && view.editor && view.editor.cm;
@@ -496,16 +711,39 @@ class HeadingLinksSettingTab extends obsidian.PluginSettingTab {
           await this.plugin.saveSettings();
         })
       );
+
+    new obsidian.Setting(containerEl)
+      .setName('Title backlinks')
+      .setDesc('At the end of the note title, name every other note linking to this note.')
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.titleBacklinks).onChange(async (value) => {
+          this.plugin.settings.titleBacklinks = value;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new obsidian.Setting(containerEl)
+      .setName('Heading summary')
+      .setDesc('Next to the title, how many headings of this note are linked to. Click it for the list.')
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.headingSummary).onChange(async (value) => {
+          this.plugin.settings.headingSummary = value;
+          await this.plugin.saveSettings();
+        })
+      );
   }
 }
 
 module.exports = HeadingLinksPlugin;
 module.exports.__test = {
+  BacklinkIndex,
   splitLinkText,
   normalizeHeading,
   parseHeadings,
   findSection,
   breadcrumbParts,
+  dedupeBySource,
   groupRefsByHeadingLine,
+  summarizeHeadings,
   INLINE_LINK,
 };

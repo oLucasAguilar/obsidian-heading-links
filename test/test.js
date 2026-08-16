@@ -102,6 +102,53 @@ check('two links from one note collapse with a count', grouped.get(2)[0].count, 
 check('a sibling heading is separate', grouped.get(4).map((r) => r.sourceName), ['Todo']);
 check('the unrelated heading of the same name gets nothing', grouped.has(6), false);
 
+/* ---- which notes get credited to the note itself ---- */
+const vault = {
+  'Todo.md': ['Recipes#Ideas#Ana', 'Recipes', 'Recipes#^abc123', 'Other'],
+  'Other.md': ['Recipes#Ideas#Ana'],
+  'Recipes.md': ['Recipes#Ideas'],
+};
+const fakeApp = {
+  vault: {
+    getMarkdownFiles: () =>
+      Object.keys(vault).map((p) => ({ path: p, basename: p.replace(/\.md$/, '') })),
+  },
+  metadataCache: {
+    getFileCache: (file) => ({
+      links: vault[file.path].map((link) => ({ link, position: { start: { line: 0 } } })),
+    }),
+    getFirstLinkpathDest: (linkpath) => ({ path: linkpath + '.md', basename: linkpath }),
+  },
+};
+const index = new t.BacklinkIndex(fakeApp);
+index.rebuild();
+check('the note itself takes what no heading claims',
+  index.fileRefsFor('Recipes.md').map((r) => `${r.sourceName}:${r.count}`), ['Todo:2']);
+check('a heading link is credited to the heading and not to the note',
+  index.refsFor('Recipes.md').map((r) => r.sourceName), ['Todo', 'Other']);
+check('a note linking only through a heading is not at the title',
+  index.fileRefsFor('Recipes.md').some((r) => r.sourceName === 'Other'), false);
+check('a note linking to itself is not credited', index.fileRefsFor('Recipes.md').some((r) => r.sourceName === 'Recipes'), false);
+check('a note with no incoming link has none', index.fileRefsFor('Todo.md').map((r) => r.sourceName), []);
+
+check('links from one note collapse with a count',
+  t.dedupeBySource([
+    { sourcePath: 'A.md', sourceName: 'A', line: 1 },
+    { sourcePath: 'A.md', sourceName: 'A', line: 4 },
+  ]),
+  [{ sourcePath: 'A.md', sourceName: 'A', line: 1, count: 1 + 1 }]);
+
+/* ---- the summary behind the chip ---- */
+const summary = t.summarizeHeadings(note, refs.concat([
+  { sourcePath: 'Late.md', sourceName: 'Late', segments: ['Gone'], line: 1 },
+]));
+check('the summary is in document order, not link order',
+  summary.map((g) => g.text), ['Ana', 'Bea']);
+check('each heading carries its notes', summary[0].refs.map((r) => r.sourceName), ['Other', 'Todo']);
+check('a link to a heading that no longer exists drops out',
+  summary.some((g) => g.text === 'Gone'), false);
+check('nothing linked means no chip', t.summarizeHeadings(note, []), []);
+
 /* ---- telling a link from an embed ---- */
 t.INLINE_LINK.lastIndex = 0;
 check('an embed is marked', t.INLINE_LINK.exec('![[A#B]]')[1], '!');
