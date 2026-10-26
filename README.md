@@ -1,45 +1,34 @@
 # Heading Links
 
-Four small things for links between notes, all in Live Preview.
+**Links to headings, readable while you edit.**
 
-## Breadcrumbs while editing
+Four small things, all in Live Preview:
 
-`[[Recipes#Bread#Sourdough]]` reads as `Recipes > Bread > Sourdough`.
+- `[[Recipes#Bread#Sourdough]]` reads as `Recipes > Bread > Sourdough`
+- a heading shows which notes link to it
+- the note title shows which notes link to the note
+- `+3 headings` next to the title counts the headings other notes link to
 
-Obsidian already does this in Reading view, but in Live Preview the link stays raw. Put the cursor on it and the raw text comes back, the same as any other link. Click to open, ctrl or middle click to open in a tab.
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/breadcrumbs-dark.gif"><img alt="A typed link to Recipes#Bread#Sourdough turns into the breadcrumb Recipes > Bread > Sourdough" src="docs/breadcrumbs-light.gif"></picture>
 
-Nested anchors work: every `#` becomes a step.
-
-![](docs/breadcrumbs.gif)
-
-## Which notes link to a heading
-
-At the end of a heading line, the names of the notes that link to it.
-
-Click a name to open it, ctrl+hover to preview. A note linking to its own heading is not listed, since that tells you nothing.
-
-![](docs/backlinks.gif)
-
-## Which notes link to the note
-
-The same at the end of the note title, for the note as a whole. What shows here is what no heading claims: `[[Recipes]]` and `[[Recipes#^abc123]]`. A link into a heading is named under that heading instead, so no note is listed twice on the screen.
-
-The title is what renames the file, so the names are pulled out while you are editing it and come back when you leave.
-
-## The headings someone linked to
-
-Next to the title, `+3 headings` counts the headings of this note that other notes point at. Click it and the list opens: each heading with the notes that wrote the link. Click a heading to jump to it, click a note to open it.
-
-The badge at each heading already says this in place, but only once you have scrolled there. The count is the part you can see from the top of a long note.
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/backlinks-dark.gif"><img alt="Linking to Recipes#Soup adds Today next to Monday at the end of the Soup heading" src="docs/backlinks-light.gif"></picture>
 
 ## Install
 
-Not in the community store. Copy `main.js`, `manifest.json` and `styles.css` into `<vault>/.obsidian/plugins/heading-links/`, or point [BRAT](https://github.com/TfTHacker/obsidian42-brat) at this repo.
+Not in the community store. Copy `main.js`, `manifest.json` and `styles.css` into `<vault>/.obsidian/plugins/heading-links/`, or add this repo to [BRAT](https://github.com/TfTHacker/obsidian42-brat).
 
-## Settings
+## In practice
 
-Each of the four can be turned off on its own. Breadcrumbs can also be applied to `![[Note#Heading]]` embeds, which is off by default.
+**Breadcrumbs**
 
-## Tests
+Put the cursor on one and the raw link comes back. Click opens the note; ctrl or middle click opens it in a tab.
 
-`node test/test.js` checks the parsing: nested anchors, heading matching, and which note ends up credited under which heading. No Obsidian needed, the API is stubbed.
+**Names on a heading or on the title**
+
+Click a name to open the note, ctrl+hover to preview it.
+
+**The count next to the title**
+
+Click it for the list: each heading, with the notes that link to it.
+
+Each of the four can be turned off in the settings. Details and tests: [docs/usage.md](docs/usage.md).
