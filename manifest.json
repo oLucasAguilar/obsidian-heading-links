@@ -1,7 +1,7 @@
 {
   "id": "heading-links",
   "name": "Heading Links",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "minAppVersion": "1.4.0",
   "description": "Heading links read as breadcrumbs while editing, and headings show which notes link to them.",
   "author": "Lucas Aguilar",
